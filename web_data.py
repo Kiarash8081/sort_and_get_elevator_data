@@ -1,4 +1,4 @@
-﻿from flask import Flask, request, render_template_string, session, jsonify, send_file
+﻿from flask import Flask, request, render_template_string, session, jsonify, send_file, send_from_directory
 from werkzeug.middleware.proxy_fix import ProxyFix
 import pandas as pd
 import os
@@ -296,6 +296,7 @@ INDEX_HTML = '''
         <div id="choicePanel" class="panel active">
             <div class="choice-grid">
                 <button type="button" class="choice-btn primary" id="chooseAnalyze">انتخاب فایل CSV و شروع تحلیل</button>
+                <button type="button" class="choice-btn primary" id="chooseParking" style="background:#3d6b4f;">تحلیل برای پارکینگ شناور</button>
                 <button type="button" class="choice-btn secondary" id="chooseSkip">رفتن مستقیم به صفحه وب (بدون انتخاب فایل)</button>
             </div>
         </div>
@@ -323,14 +324,15 @@ INDEX_HTML = '''
     <script>
         const choicePanel = document.getElementById('choicePanel');
         const uploadPanel = document.getElementById('uploadPanel');
-        document.getElementById('chooseAnalyze').addEventListener('click', function() {
+        function goUpload(openParking) {
+            if (openParking) sessionStorage.setItem('openParking', '1');
+            else sessionStorage.removeItem('openParking');
             choicePanel.classList.remove('active');
             uploadPanel.classList.add('active');
-        });
-        document.getElementById('chooseSkip').addEventListener('click', function() {
-            choicePanel.classList.remove('active');
-            uploadPanel.classList.add('active');
-        });
+        }
+        document.getElementById('chooseAnalyze').addEventListener('click', function() { goUpload(false); });
+        document.getElementById('chooseParking').addEventListener('click', function() { goUpload(true); });
+        document.getElementById('chooseSkip').addEventListener('click', function() { goUpload(false); });
         document.getElementById('fileInput').addEventListener('change', function(e) {
             document.getElementById('fileName').textContent = e.target.files[0] ? e.target.files[0].name : 'هیچ فایلی انتخاب نشده است';
         });
@@ -807,7 +809,7 @@ RESULT_HTML = '''
             <div class="parking-note">
                 وقتی حداقل ۶۰ ثانیه هیچ دکمه‌ای نخورده، اولین درخواست بعدی ثبت می‌شود.
                 فاصله یعنی چند طبقه بین آخرین محل شناخته‌شده آسانسور و طبقه مبدأ همان درخواست فاصله بوده است.
-                برای دکمه راهرو (اپکال/داونکال) محاسبه شده است.
+                برای دکمه راهرو (اپکال/داونکال) نزدیک‌ترین، دورترین، و میانگین همه آسانسورهای شناخته‌شده هم حساب می‌شود.
             </div>
             {% if result.parking_stats and result.parking_stats.get('count') %}
             <div class="summary-grid">
@@ -830,6 +832,14 @@ RESULT_HTML = '''
                 <div class="summary-card">
                     <div class="label">میانگین فاصله نزدیک‌ترین آسانسور</div>
                     <div class="value small">{{ "{:.1f}".format(result.parking_stats.avg_nearest_floors) }} طبقه</div>
+                </div>
+                <div class="summary-card">
+                    <div class="label">میانگین فاصله دورترین آسانسور</div>
+                    <div class="value small">{{ "{:.1f}".format(result.parking_stats.avg_farthest_floors) }} طبقه</div>
+                </div>
+                <div class="summary-card">
+                    <div class="label">میانگین فاصله همه آسانسورها</div>
+                    <div class="value small">{{ "{:.1f}".format(result.parking_stats.avg_all_elevators_floors) }} طبقه</div>
                 </div>
                 <div class="summary-card">
                     <div class="label">کمینه / بیشینه فاصله</div>
@@ -878,6 +888,14 @@ RESULT_HTML = '''
         var parkingBtn = document.getElementById('parkingBtn');
         var parkingSection = document.getElementById('parkingSection');
         if (parkingBtn && parkingSection) {
+            if (sessionStorage.getItem('openParking') === '1') {
+                parkingSection.classList.add('show');
+                parkingBtn.textContent = 'بستن تحلیل پارکینگ شناور';
+                sessionStorage.removeItem('openParking');
+                setTimeout(function() {
+                    parkingSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                }, 200);
+            }
             parkingBtn.addEventListener('click', function() {
                 parkingSection.classList.toggle('show');
                 parkingBtn.textContent = parkingSection.classList.contains('show')
@@ -942,13 +960,15 @@ def analyze_floating_parking(df):
                 if idle_sec >= IDLE_GAP_SECONDS:
                     assigned_pos = last_floor.get(elevator_id)
                     assigned_dist = abs(assigned_pos - floor_number) if assigned_pos is not None else None
-                    nearest_dist = min(abs(pos - floor_number) for pos in last_floor.values())
+                    all_dists = [abs(pos - floor_number) for pos in last_floor.values()]
                     records.append({
                         'idle_seconds': idle_sec,
                         'call_type': call_type,
                         'elevator_id': elevator_id,
                         'assigned_distance': assigned_dist,
-                        'nearest_distance': nearest_dist
+                        'nearest_distance': min(all_dists),
+                        'farthest_distance': max(all_dists),
+                        'avg_all_distance': sum(all_dists) / len(all_dists)
                     })
             last_request_time = event_time
 
@@ -962,6 +982,10 @@ def analyze_floating_parking(df):
         'median_assigned_floors': 0,
         'avg_nearest_floors': 0,
         'median_nearest_floors': 0,
+        'avg_farthest_floors': 0,
+        'median_farthest_floors': 0,
+        'avg_all_elevators_floors': 0,
+        'median_all_elevators_floors': 0,
         'max_assigned_floors': 0,
         'min_assigned_floors': 0,
         'pct_already_there': 0,
@@ -978,6 +1002,8 @@ def analyze_floating_parking(df):
     use = hall if len(hall) else rec_df
     assigned = pd.to_numeric(use['assigned_distance'], errors='coerce').dropna()
     nearest = pd.to_numeric(use['nearest_distance'], errors='coerce').dropna()
+    farthest = pd.to_numeric(use['farthest_distance'], errors='coerce').dropna()
+    avg_all = pd.to_numeric(use['avg_all_distance'], errors='coerce').dropna()
     if assigned.empty:
         return empty
 
@@ -997,6 +1023,10 @@ def analyze_floating_parking(df):
         'median_assigned_floors': float(assigned.median()),
         'avg_nearest_floors': float(nearest.mean()) if not nearest.empty else 0,
         'median_nearest_floors': float(nearest.median()) if not nearest.empty else 0,
+        'avg_farthest_floors': float(farthest.mean()) if not farthest.empty else 0,
+        'median_farthest_floors': float(farthest.median()) if not farthest.empty else 0,
+        'avg_all_elevators_floors': float(avg_all.mean()) if not avg_all.empty else 0,
+        'median_all_elevators_floors': float(avg_all.median()) if not avg_all.empty else 0,
         'max_assigned_floors': float(assigned.max()),
         'min_assigned_floors': float(assigned.min()),
         'pct_already_there': float((assigned == 0).mean() * 100),
@@ -1239,7 +1269,11 @@ def run_analysis_job(job_id):
 
 @app.route('/', methods=['GET'])
 def index():
-    return render_template_string(INDEX_HTML)
+    docs_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'docs')
+    resp = send_from_directory(docs_dir, 'index.html')
+    resp.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+    resp.headers['Pragma'] = 'no-cache'
+    return resp
 
 
 @app.route('/upload', methods=['POST'])
@@ -1258,7 +1292,7 @@ def upload_file():
     session['job_id'] = job_id
 
     cached_result = get_cached_result(file_hash)
-    if cached_result:
+    if False and cached_result:
         JOBS[job_id] = {
             'status': 'done',
             'percent': 100,

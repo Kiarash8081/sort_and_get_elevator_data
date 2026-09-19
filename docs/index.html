@@ -62,6 +62,7 @@
     <div id="choicePanel" class="panel active">
       <div class="choice-grid">
         <button class="choice-btn primary" id="chooseAnalyze">انتخاب فایل CSV و شروع تحلیل</button>
+        <button class="choice-btn primary" id="chooseParking" style="background:#3d6b4f;">تحلیل برای پارکینگ شناور</button>
         <button class="choice-btn secondary" id="chooseSkip">رفتن مستقیم به صفحه وب (بدون انتخاب فایل)</button>
       </div>
     </div>
@@ -90,10 +91,15 @@
     let lastReportText = '';
     let lastFilename = '';
 
-    $('chooseAnalyze').onclick = $('chooseSkip').onclick = () => {
+    function goUpload(openParking) {
+      if (openParking) sessionStorage.setItem('openParking', '1');
+      else sessionStorage.removeItem('openParking');
       $('choicePanel').classList.remove('active');
       $('uploadPanel').classList.add('active');
-    };
+    }
+    $('chooseAnalyze').onclick = function() { goUpload(false); };
+    $('chooseSkip').onclick = function() { goUpload(false); };
+    $('chooseParking').onclick = function() { goUpload(true); };
     $('fileInput').onchange = (e) => {
       $('fileName').textContent = e.target.files[0] ? e.target.files[0].name : 'هیچ فایلی انتخاب نشده است';
     };
@@ -287,14 +293,16 @@
             if (idleSec >= IDLE_GAP_SECONDS) {
               const assignedPos = lastFloor.has(row.elevator_id) ? lastFloor.get(row.elevator_id) : null;
               const assignedDist = assignedPos == null ? null : Math.abs(assignedPos - row.floor);
-              let nearest = Infinity;
-              lastFloor.forEach((pos) => { nearest = Math.min(nearest, Math.abs(pos - row.floor)); });
+              const allDists = [];
+              lastFloor.forEach((pos) => { allDists.push(Math.abs(pos - row.floor)); });
               records.push({
                 idle_seconds: idleSec,
                 call_type: row.call_type,
                 elevator_id: row.elevator_id,
                 assigned_distance: assignedDist,
-                nearest_distance: nearest
+                nearest_distance: Math.min(...allDists),
+                farthest_distance: Math.max(...allDists),
+                avg_all_distance: allDists.reduce((s, v) => s + v, 0) / allDists.length
               });
             }
           }
@@ -305,7 +313,8 @@
 
       const empty = {
         count: 0, avg_idle_seconds: 0, avg_assigned_floors: 0, median_assigned_floors: 0,
-        avg_nearest_floors: 0, max_assigned_floors: 0, min_assigned_floors: 0,
+        avg_nearest_floors: 0, avg_farthest_floors: 0, avg_all_elevators_floors: 0,
+        max_assigned_floors: 0, min_assigned_floors: 0,
         pct_already_there: 0, pct_within_1: 0,
         distance_buckets: { '0': 0, '1': 0, '2-3': 0, '4-6': 0, '7+': 0 },
         by_elevator: []
@@ -315,6 +324,8 @@
       const assigned = use.map((r) => r.assigned_distance).filter((v) => v != null);
       if (!assigned.length) return empty;
       const nearest = use.map((r) => r.nearest_distance);
+      const farthest = use.map((r) => r.farthest_distance);
+      const avgAll = use.map((r) => r.avg_all_distance);
       const avg = (arr) => arr.reduce((s, v) => s + v, 0) / arr.length;
       const mid = (arr) => {
         const s = [...arr].sort((a, b) => a - b);
@@ -346,6 +357,8 @@
         avg_assigned_floors: avg(assigned),
         median_assigned_floors: mid(assigned),
         avg_nearest_floors: avg(nearest),
+        avg_farthest_floors: avg(farthest),
+        avg_all_elevators_floors: avg(avgAll),
         max_assigned_floors: Math.max(...assigned),
         min_assigned_floors: Math.min(...assigned),
         pct_already_there: assigned.filter((v) => v === 0).length / assigned.length * 100,
@@ -407,6 +420,8 @@
           <div class="card"><div class="label">میانگین فاصله آسانسور تخصیص‌یافته</div><div class="value">${fmt(p.avg_assigned_floors, 1)} طبقه</div></div>
           <div class="card"><div class="label">میانه فاصله</div><div class="value">${fmt(p.median_assigned_floors, 1)} طبقه</div></div>
           <div class="card"><div class="label">میانگین فاصله نزدیک‌ترین آسانسور</div><div class="value">${fmt(p.avg_nearest_floors, 1)} طبقه</div></div>
+          <div class="card"><div class="label">میانگین فاصله دورترین آسانسور</div><div class="value">${fmt(p.avg_farthest_floors, 1)} طبقه</div></div>
+          <div class="card"><div class="label">میانگین فاصله همه آسانسورها</div><div class="value">${fmt(p.avg_all_elevators_floors, 1)} طبقه</div></div>
           <div class="card"><div class="label">کمینه / بیشینه</div><div class="value">${fmt(p.min_assigned_floors, 0)} / ${fmt(p.max_assigned_floors, 0)}</div></div>
           <div class="card"><div class="label">همان طبقه بوده</div><div class="value">${fmt(p.pct_already_there, 1)}٪</div></div>
           <div class="card"><div class="label">حداکثر ۱ طبقه فاصله</div><div class="value">${fmt(p.pct_within_1, 1)}٪</div></div>
@@ -453,12 +468,25 @@
         </div>
         <div id="parkingSection" class="parking-section">
           <div class="section">تحلیل پارکینگ شناور</div>
-          <div class="parking-note">وقتی حداقل ۶۰ ثانیه هیچ دکمه‌ای نخورده، اولین درخواست بعدی ثبت می‌شود. فاصله یعنی چند طبقه بین آخرین محل شناخته‌شده آسانسور و طبقه مبدأ همان درخواست. برای دکمه راهرو (اپکال/داونکال) محاسبه شده است.</div>
+          <div class="parking-note">وقتی حداقل ۶۰ ثانیه هیچ دکمه‌ای نخورده، اولین درخواست بعدی ثبت می‌شود. فاصله یعنی چند طبقه بین آخرین محل شناخته‌شده آسانسور و طبقه مبدأ همان درخواست. برای دکمه راهرو، نزدیک‌ترین، دورترین، و میانگین همه آسانسورهای شناخته‌شده هم حساب می‌شود.</div>
           ${parkingHtml}
         </div>`;
       $('home').style.display = 'none';
       $('report').style.display = 'block';
-      $('backBtn').onclick = () => { $('report').style.display = 'none'; $('home').style.display = 'block'; };
+      $('backBtn').onclick = () => {
+        $('report').style.display = 'none';
+        $('home').style.display = 'block';
+        $('uploadPanel').classList.remove('active');
+        $('choicePanel').classList.add('active');
+        $('fileInput').value = '';
+        $('fileName').textContent = 'هیچ فایلی انتخاب نشده است';
+        $('loadingText').classList.remove('show');
+        $('progressWrap').classList.remove('show');
+        $('progressFill').style.width = '0%';
+        $('progressPercent').textContent = '0%';
+        $('startBtn').disabled = false;
+        $('startBtn').textContent = 'شروع تحلیل';
+      };
       $('dlBtn').onclick = () => {
         const blob = new Blob([lastReportText], { type: 'text/plain;charset=utf-8' });
         const a = document.createElement('a');
@@ -475,6 +503,12 @@
           : 'تحلیل برای پارکینگ شناور';
         if (parkingSection.classList.contains('show')) parkingSection.scrollIntoView({ behavior: 'smooth' });
       };
+      if (sessionStorage.getItem('openParking') === '1') {
+        parkingSection.classList.add('show');
+        parkingBtn.textContent = 'بستن تحلیل پارکینگ شناور';
+        sessionStorage.removeItem('openParking');
+        setTimeout(() => parkingSection.scrollIntoView({ behavior: 'smooth' }), 150);
+      }
     }
 
     $('uploadForm').onsubmit = async (e) => {
