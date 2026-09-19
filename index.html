@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>تحلیل آمار تماس‌ها و سفرهای آسانسور</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #e8e8e8; color: #2c2c2c; min-height: 100vh; padding: 20px; }
+    .home { max-width: 650px; margin: 40px auto; background: #fff; border-radius: 16px; box-shadow: 0 4px 20px rgba(0,0,0,.08); padding: 45px 40px; text-align: center; }
+    h1 { font-size: 26px; font-weight: 300; }
+    .subtitle { font-size: 14px; color: #999; margin-top: 8px; }
+    .choice-grid { display: grid; gap: 12px; margin: 22px 0 10px; }
+    .choice-btn, .btn { display: block; width: 100%; border: none; border-radius: 10px; padding: 16px 18px; font-size: 15px; cursor: pointer; }
+    .primary { background: #4a4a4a; color: #fff; }
+    .secondary { background: #efefef; color: #333; }
+    .panel { display: none; }
+    .panel.active { display: block; }
+    .required { font-size: 12px; color: #aaa; background: #f8f8f8; padding: 12px; border-radius: 8px; line-height: 1.8; margin-top: 10px; }
+    .required span { background: #eee; color: #555; padding: 2px 8px; border-radius: 4px; font-size: 11px; }
+    .upload-area { border: 2px dashed #d0d0d0; border-radius: 12px; padding: 35px 20px; margin: 20px 0; background: #f8f8f8; }
+    .upload-area input { display: none; }
+    .upload-label { display: inline-block; padding: 12px 35px; background: #e0e0e0; border-radius: 8px; cursor: pointer; }
+    .file-name { margin-top: 15px; font-size: 14px; color: #777; min-height: 24px; }
+    .loading { display: none; margin: 15px 0 8px; color: #666; }
+    .loading.show { display: block; }
+    .progress-wrap { display: none; margin: 12px 0; }
+    .progress-wrap.show { display: block; }
+    .bar-bg { height: 10px; background: #ececec; border-radius: 20px; overflow: hidden; }
+    .bar-fill { height: 100%; width: 0; background: #4a4a4a; transition: width .2s; }
+    .percent { margin-top: 8px; font-size: 20px; }
+    .error { background: #fff0f0; color: #cc4444; padding: 14px; border-radius: 8px; margin: 12px 0; display: none; }
+    .report { display: none; max-width: 1500px; margin: 0 auto; background: #fff; border-radius: 20px; padding: 40px; box-shadow: 0 4px 20px rgba(0,0,0,.06); }
+    .report-header { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; border-bottom: 2px solid #e8e8e8; padding-bottom: 18px; margin-bottom: 28px; }
+    .badge { padding: 6px 18px; border-radius: 30px; font-size: 13px; background: #f0f0f0; }
+    .summary-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 14px; margin-bottom: 30px; }
+    .card { background: #f7f7f7; border: 1px solid #eaeaea; border-radius: 14px; padding: 18px 14px; text-align: center; }
+    .card .label { font-size: 11px; color: #999; }
+    .card .value { font-size: 24px; font-weight: 300; margin-top: 6px; }
+    .section { font-size: 22px; font-weight: 300; margin: 32px 0 16px; padding-bottom: 10px; border-bottom: 2px solid #e8e8e8; }
+    .daily-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 15px; }
+    .daily { background: #f8f8f8; border: 1px solid #eaeaea; border-radius: 12px; padding: 16px 18px; }
+    .daily .date { font-size: 17px; font-weight: 500; margin-bottom: 10px; padding-bottom: 8px; border-bottom: 2px solid #e0e0e0; }
+    .row { display: flex; justify-content: space-between; font-size: 13px; padding: 4px 0; color: #555; }
+    .info-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 18px; }
+    .info { background: #f7f7f7; border: 1px solid #eaeaea; border-radius: 14px; padding: 18px 22px; }
+    .info h3 { font-size: 16px; font-weight: 400; margin-bottom: 12px; padding-bottom: 8px; border-bottom: 1px solid #eaeaea; }
+    .info li { display: flex; justify-content: space-between; padding: 7px 0; border-bottom: 1px solid #f0f0f0; font-size: 14px; }
+    .actions { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 28px; padding-top: 20px; border-top: 2px solid #e8e8e8; }
+    .actions a, .actions button { background: #4a4a4a; color: #fff; border: none; padding: 12px 28px; border-radius: 10px; text-decoration: none; cursor: pointer; font-size: 15px; }
+  </style>
+</head>
+<body>
+  <div id="home" class="home">
+    <h1>تحلیل آمار تماس‌ها و سفرهای آسانسور</h1>
+    <div class="subtitle">فایل CSV را در همین صفحه انتخاب کنید؛ تحلیل داخل مرورگر انجام می‌شود</div>
+    <div id="err" class="error"></div>
+    <div id="choicePanel" class="panel active">
+      <div class="choice-grid">
+        <button class="choice-btn primary" id="chooseAnalyze">انتخاب فایل CSV و شروع تحلیل</button>
+        <button class="choice-btn secondary" id="chooseSkip">رفتن مستقیم به صفحه وب (بدون انتخاب فایل)</button>
+      </div>
+    </div>
+    <div id="uploadPanel" class="panel">
+      <div class="required">ستون‌های مورد نیاز: <span>id</span> <span>elevator_id</span> <span>event_time</span> <span>floor_number</span> <span>call_type</span> <span>event_type</span> <span>created_at</span></div>
+      <form id="uploadForm">
+        <div class="upload-area">
+          <input type="file" id="fileInput" accept=".csv,text/csv">
+          <label for="fileInput" class="upload-label">انتخاب فایل CSV</label>
+          <div class="file-name" id="fileName">هیچ فایلی انتخاب نشده است</div>
+        </div>
+        <button type="submit" class="choice-btn primary" id="startBtn">شروع تحلیل</button>
+        <div class="loading" id="loadingText">در حال پردازش داده‌ها...</div>
+        <div class="progress-wrap" id="progressWrap">
+          <div class="bar-bg"><div class="bar-fill" id="progressFill"></div></div>
+          <div class="percent" id="progressPercent">0%</div>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div id="report" class="report"></div>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    let lastReportText = '';
+    let lastFilename = '';
+
+    $('chooseAnalyze').onclick = $('chooseSkip').onclick = () => {
+      $('choicePanel').classList.remove('active');
+      $('uploadPanel').classList.add('active');
+    };
+    $('fileInput').onchange = (e) => {
+      $('fileName').textContent = e.target.files[0] ? e.target.files[0].name : 'هیچ فایلی انتخاب نشده است';
+    };
+
+    function showError(msg) {
+      $('err').style.display = 'block';
+      $('err').textContent = msg;
+    }
+    function setProgress(p, msg) {
+      $('progressFill').style.width = p + '%';
+      $('progressPercent').textContent = Math.round(p) + '%';
+      $('loadingText').textContent = msg;
+    }
+    function yieldUI() { return new Promise((r) => setTimeout(r, 0)); }
+    function fmt(n, d = 0) {
+      return Number(n || 0).toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d });
+    }
+    function quantile(sorted, q) {
+      if (!sorted.length) return 0;
+      const pos = (sorted.length - 1) * q;
+      const base = Math.floor(pos);
+      const rest = pos - base;
+      return sorted[base + 1] !== undefined ? sorted[base] + rest * (sorted[base + 1] - sorted[base]) : sorted[base];
+    }
+    function parseCsv(text) {
+      const lines = text.replace(/^\uFEFF/, '').split(/\r?\n/).filter((l) => l.trim());
+      if (!lines.length) return [];
+      const headers = lines[0].split(',').map((h) => h.trim().replace(/^"|"$/g, ''));
+      const rows = [];
+      for (let i = 1; i < lines.length; i++) {
+        const cols = lines[i].split(',');
+        const row = {};
+        headers.forEach((h, idx) => { row[h] = (cols[idx] || '').trim().replace(/^"|"$/g, ''); });
+        rows.push(row);
+      }
+      return rows;
+    }
+
+    async function analyze(rows) {
+      const needed = ['id', 'elevator_id', 'event_time', 'floor_number', 'call_type', 'event_type'];
+      const missing = needed.filter((c) => !(c in (rows[0] || {})));
+      if (missing.length) throw new Error('ستون‌های زیر در فایل وجود ندارند: ' + missing.join(', '));
+
+      setProgress(12, 'در حال مرتب‌سازی رویدادها...');
+      await yieldUI();
+
+      const added = new Map();
+      const removed = new Map();
+      for (const row of rows) {
+        const t = Date.parse(row.event_time);
+        if (!Number.isFinite(t)) continue;
+        const key = String(row.call_type) + '_' + String(row.elevator_id) + '_' + String(row.floor_number);
+        const item = {
+          id: row.id,
+          elevator_id: row.elevator_id,
+          floor_number: row.floor_number,
+          call_type: row.call_type,
+          t,
+          date: new Date(t).toISOString().slice(0, 10)
+        };
+        if (row.event_type === 'ADDED') {
+          if (!added.has(key)) added.set(key, []);
+          added.get(key).push(item);
+        } else if (row.event_type === 'REMOVED') {
+          if (!removed.has(key)) removed.set(key, []);
+          removed.get(key).push(item);
+        }
+      }
+
+      const keys = Array.from(added.keys());
+      const results = [];
+      setProgress(18, 'در حال تطبیق تماس‌ها...');
+      for (let i = 0; i < keys.length; i++) {
+        const aList = added.get(keys[i]).sort((a, b) => a.t - b.t);
+        const rList = (removed.get(keys[i]) || []).sort((a, b) => a.t - b.t);
+        let j = 0;
+        for (const a of aList) {
+          while (j < rList.length && rList[j].t <= a.t) j++;
+          if (j >= rList.length) continue;
+          const diff = (rList[j].t - a.t) / 1000;
+          if (diff >= 2 && diff <= 600) {
+            if (a.call_type === 'INCALL') {
+              results.push({ ...a, wait_time: diff, travel_time: 0 });
+            } else if (a.call_type === 'UPCALL' || a.call_type === 'DOWNCALL') {
+              results.push({ ...a, wait_time: 0, travel_time: diff });
+            }
+            j++;
+          }
+        }
+        if (i % 25 === 0 || i === keys.length - 1) {
+          setProgress(18 + ((i + 1) / keys.length) * 70, 'در حال تطبیق تماس‌ها... ' + (i + 1) + ' از ' + keys.length);
+          await yieldUI();
+        }
+      }
+      if (!results.length) throw new Error('هیچ تماس کاملی پیدا نشد!');
+
+      setProgress(90, 'در حال حذف داده‌های پرت...');
+      await yieldUI();
+      function dropIqr(items, field) {
+        const vals = items.map((x) => x[field]).sort((a, b) => a - b);
+        const q1 = quantile(vals, 0.25);
+        const q3 = quantile(vals, 0.75);
+        const iqr = q3 - q1;
+        const lo = q1 - 1.5 * iqr;
+        const hi = q3 + 1.5 * iqr;
+        return items.filter((x) => x[field] >= lo && x[field] <= hi);
+      }
+      let cleaned = results;
+      if (cleaned.some((x) => x.wait_time > 0)) cleaned = dropIqr(cleaned, 'wait_time');
+      if (cleaned.some((x) => x.travel_time > 0)) cleaned = dropIqr(cleaned, 'travel_time');
+
+      setProgress(95, 'در حال محاسبه آمار روزانه...');
+      await yieldUI();
+      const byDay = new Map();
+      const floorStats = new Map();
+      const elevStats = new Map();
+      const typeStats = new Map();
+      for (const r of cleaned) {
+        if (!byDay.has(r.date)) byDay.set(r.date, []);
+        byDay.get(r.date).push(r);
+        floorStats.set(r.floor_number, (floorStats.get(r.floor_number) || 0) + 1);
+        elevStats.set(r.elevator_id, (elevStats.get(r.elevator_id) || 0) + 1);
+        typeStats.set(r.call_type, (typeStats.get(r.call_type) || 0) + 1);
+      }
+      const days = Array.from(byDay.keys()).sort();
+      const daily = days.map((day) => {
+        const items = byDay.get(day);
+        const waits = items.filter((x) => x.call_type === 'INCALL').map((x) => x.wait_time);
+        const travels = items.filter((x) => x.call_type === 'UPCALL' || x.call_type === 'DOWNCALL').map((x) => x.travel_time);
+        const avg = (arr) => arr.length ? arr.reduce((s, v) => s + v, 0) / arr.length : 0;
+        return {
+          day,
+          total_calls: items.length,
+          incalls: items.filter((x) => x.call_type === 'INCALL').length,
+          upcalls: items.filter((x) => x.call_type === 'UPCALL').length,
+          downcalls: items.filter((x) => x.call_type === 'DOWNCALL').length,
+          avg_wait_time: avg(waits),
+          total_wait_time: waits.reduce((s, v) => s + v, 0),
+          max_wait_time: waits.length ? Math.max(...waits) : 0,
+          min_wait_time: waits.length ? Math.min(...waits) : 0,
+          avg_travel_time: avg(travels),
+          total_travel_time: travels.reduce((s, v) => s + v, 0),
+          max_travel_time: travels.length ? Math.max(...travels) : 0,
+          min_travel_time: travels.length ? Math.min(...travels) : 0,
+          unique_elevators: new Set(items.map((x) => x.elevator_id)).size
+        };
+      });
+      const avgWait = daily.length ? daily.reduce((s, d) => s + d.avg_wait_time, 0) / daily.length : 0;
+      const avgTravel = daily.length ? daily.reduce((s, d) => s + d.avg_travel_time, 0) / daily.length : 0;
+      return {
+        daily,
+        total_days: daily.length,
+        total_calls: cleaned.length,
+        total_incalls: cleaned.filter((x) => x.call_type === 'INCALL').length,
+        total_upcalls: cleaned.filter((x) => x.call_type === 'UPCALL').length,
+        total_downcalls: cleaned.filter((x) => x.call_type === 'DOWNCALL').length,
+        avg_wait_time: avgWait,
+        avg_travel_time: avgTravel,
+        min_date: days[0] || '',
+        max_date: days[days.length - 1] || '',
+        floor_stats: Array.from(floorStats.entries()).sort((a, b) => b[1] - a[1]).slice(0, 10),
+        elevator_stats: Array.from(elevStats.entries()).sort((a, b) => b[1] - a[1]).slice(0, 10),
+        call_type_stats: Array.from(typeStats.entries()).sort((a, b) => b[1] - a[1])
+      };
+    }
+
+    function typeLabel(t) {
+      if (t === 'INCALL') return 'تماس ورودی';
+      if (t === 'UPCALL') return 'اپکال';
+      if (t === 'DOWNCALL') return 'داونکال';
+      return t;
+    }
+
+    function buildReportText(result) {
+      const lines = [];
+      lines.push('='.repeat(70));
+      lines.push('گزارش کامل آمار روزانه تماس‌ها و سفرهای آسانسور');
+      lines.push('='.repeat(70));
+      lines.push('بازه زمانی: از ' + result.min_date + ' تا ' + result.max_date);
+      lines.push('تعداد روزهای تحلیل: ' + result.total_days);
+      lines.push('مجموع تماس‌ها: ' + result.total_calls);
+      lines.push('میانگین زمان انتظار: ' + result.avg_wait_time.toFixed(1) + ' ثانیه');
+      lines.push('میانگین زمان سفر: ' + result.avg_travel_time.toFixed(1) + ' ثانیه');
+      result.daily.forEach((d, i) => {
+        lines.push('');
+        lines.push('روز ' + (i + 1) + ': ' + d.day);
+        lines.push('   کل تماس‌ها: ' + d.total_calls);
+        lines.push('   INCALL: ' + d.incalls + ' | UPCALL: ' + d.upcalls + ' | DOWNCALL: ' + d.downcalls);
+        lines.push('   میانگین انتظار: ' + d.avg_wait_time.toFixed(1) + ' ثانیه');
+        lines.push('   میانگین سفر: ' + d.avg_travel_time.toFixed(1) + ' ثانیه');
+      });
+      return lines.join('\n');
+    }
+
+    function renderReport(result, filename) {
+      lastReportText = buildReportText(result);
+      lastFilename = filename;
+      const now = new Date().toISOString().slice(0, 16).replace('T', ' ');
+      const dailyHtml = result.daily.map((d) => `
+        <div class="daily">
+          <div class="date">${d.day}</div>
+          <div class="row"><span>کل تماس‌ها</span><b>${fmt(d.total_calls)}</b></div>
+          <div class="row"><span>تماس ورودی</span><span>${fmt(d.incalls)}</span></div>
+          <div class="row"><span>اپکال</span><span>${fmt(d.upcalls)}</span></div>
+          <div class="row"><span>داونکال</span><span>${fmt(d.downcalls)}</span></div>
+          <div class="row"><span>میانگین انتظار</span><span>${fmt(d.avg_wait_time, 1)} ثانیه</span></div>
+          <div class="row"><span>میانگین سفر</span><span>${fmt(d.avg_travel_time, 1)} ثانیه</span></div>
+          <div class="row"><span>تعداد آسانسورها</span><span>${d.unique_elevators}</span></div>
+        </div>`).join('');
+      const list = (arr, label) => arr.map(([k, v]) => `<li><span>${label} ${k}</span><span>${fmt(v)}</span></li>`).join('');
+      $('report').innerHTML = `
+        <div class="report-header">
+          <div><h1 style="font-weight:300">گزارش جامع تحلیل آسانسور</h1><div class="subtitle">پردازش رویدادهای تماس و سفر</div></div>
+          <div><span class="badge">فایل: ${filename}</span> <span class="badge">${now}</span></div>
+        </div>
+        <div class="summary-grid">
+          <div class="card"><div class="label">تعداد روزها</div><div class="value">${result.total_days}</div></div>
+          <div class="card"><div class="label">کل تماس‌ها</div><div class="value">${fmt(result.total_calls)}</div></div>
+          <div class="card"><div class="label">تماس ورودی</div><div class="value">${fmt(result.total_incalls)}</div></div>
+          <div class="card"><div class="label">اپکال</div><div class="value">${fmt(result.total_upcalls)}</div></div>
+          <div class="card"><div class="label">داونکال</div><div class="value">${fmt(result.total_downcalls)}</div></div>
+          <div class="card"><div class="label">میانگین انتظار</div><div class="value">${fmt(result.avg_wait_time, 1)} ثانیه</div></div>
+          <div class="card"><div class="label">میانگین سفر</div><div class="value">${fmt(result.avg_travel_time, 1)} ثانیه</div></div>
+          <div class="card"><div class="label">بازه زمانی</div><div class="value" style="font-size:14px">${result.min_date}<br>تا<br>${result.max_date}</div></div>
+        </div>
+        <div class="section">آمار روزانه تماس‌ها</div>
+        <div class="daily-cards">${dailyHtml}</div>
+        <div class="section">تحلیل‌های تکمیلی</div>
+        <div class="info-grid">
+          <div class="info"><h3>توزیع تماس‌ها بر اساس طبقه</h3><ul>${list(result.floor_stats, 'طبقه')}</ul></div>
+          <div class="info"><h3>آسانسورهای پرمصرف</h3><ul>${list(result.elevator_stats, 'آسانسور')}</ul></div>
+          <div class="info"><h3>توزیع نوع تماس</h3><ul>${result.call_type_stats.map(([k, v]) => `<li><span>${typeLabel(k)}</span><span>${fmt(v)} (${fmt(v / result.total_calls * 100, 1)}%)</span></li>`).join('')}</ul></div>
+        </div>
+        <div class="actions">
+          <button type="button" id="backBtn">بازگشت به صفحه اصلی</button>
+          <button type="button" id="dlBtn">دانلود گزارش متنی</button>
+        </div>`;
+      $('home').style.display = 'none';
+      $('report').style.display = 'block';
+      $('backBtn').onclick = () => { $('report').style.display = 'none'; $('home').style.display = 'block'; };
+      $('dlBtn').onclick = () => {
+        const blob = new Blob([lastReportText], { type: 'text/plain;charset=utf-8' });
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = 'elevator_call_analysis.txt';
+        a.click();
+      };
+    }
+
+    $('uploadForm').onsubmit = async (e) => {
+      e.preventDefault();
+      const file = $('fileInput').files[0];
+      if (!file) { alert('لطفا یک فایل انتخاب کنید'); return; }
+      $('startBtn').disabled = true;
+      $('loadingText').classList.add('show');
+      $('progressWrap').classList.add('show');
+      $('err').style.display = 'none';
+      setProgress(4, 'در حال خواندن فایل CSV...');
+      try {
+        const text = await file.text();
+        const rows = parseCsv(text);
+        const result = await analyze(rows);
+        setProgress(100, 'تحلیل کامل شد');
+        renderReport(result, file.name);
+      } catch (err) {
+        showError(err.message || String(err));
+      } finally {
+        $('startBtn').disabled = false;
+        $('startBtn').textContent = 'شروع تحلیل';
+      }
+    };
+  </script>
+</body>
+</html>
