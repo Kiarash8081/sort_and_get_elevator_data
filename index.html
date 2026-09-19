@@ -48,6 +48,10 @@
     .info li { display: flex; justify-content: space-between; padding: 7px 0; border-bottom: 1px solid #f0f0f0; font-size: 14px; }
     .actions { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 28px; padding-top: 20px; border-top: 2px solid #e8e8e8; }
     .actions a, .actions button { background: #4a4a4a; color: #fff; border: none; padding: 12px 28px; border-radius: 10px; text-decoration: none; cursor: pointer; font-size: 15px; }
+    .btn-parking { background: #3d6b4f !important; }
+    .parking-section { display: none; margin-top: 24px; padding: 24px; background: #f3f7f4; border: 1px solid #cfe0d3; border-radius: 16px; }
+    .parking-section.show { display: block; }
+    .parking-note { font-size: 13px; color: #667766; line-height: 1.8; margin-bottom: 16px; }
   </style>
 </head>
 <body>
@@ -239,6 +243,7 @@
       });
       const avgWait = daily.length ? daily.reduce((s, d) => s + d.avg_wait_time, 0) / daily.length : 0;
       const avgTravel = daily.length ? daily.reduce((s, d) => s + d.avg_travel_time, 0) / daily.length : 0;
+      const parking_stats = analyzeFloatingParking(rows);
       return {
         daily,
         total_days: daily.length,
@@ -252,7 +257,101 @@
         max_date: days[days.length - 1] || '',
         floor_stats: Array.from(floorStats.entries()).sort((a, b) => b[1] - a[1]).slice(0, 10),
         elevator_stats: Array.from(elevStats.entries()).sort((a, b) => b[1] - a[1]).slice(0, 10),
-        call_type_stats: Array.from(typeStats.entries()).sort((a, b) => b[1] - a[1])
+        call_type_stats: Array.from(typeStats.entries()).sort((a, b) => b[1] - a[1]),
+        parking_stats
+      };
+    }
+
+    const IDLE_GAP_SECONDS = 60;
+
+    function analyzeFloatingParking(rows) {
+      const sorted = rows
+        .map((row) => ({
+          t: Date.parse(row.event_time),
+          elevator_id: row.elevator_id,
+          floor: Number(row.floor_number),
+          call_type: row.call_type,
+          event_type: row.event_type
+        }))
+        .filter((r) => Number.isFinite(r.t) && Number.isFinite(r.floor))
+        .sort((a, b) => a.t - b.t);
+
+      const lastFloor = new Map();
+      let lastRequest = null;
+      const records = [];
+      for (const row of sorted) {
+        const isRequest = row.event_type === 'ADDED' && (row.call_type === 'UPCALL' || row.call_type === 'DOWNCALL' || row.call_type === 'INCALL');
+        if (isRequest) {
+          if (lastRequest != null && lastFloor.size) {
+            const idleSec = (row.t - lastRequest) / 1000;
+            if (idleSec >= IDLE_GAP_SECONDS) {
+              const assignedPos = lastFloor.has(row.elevator_id) ? lastFloor.get(row.elevator_id) : null;
+              const assignedDist = assignedPos == null ? null : Math.abs(assignedPos - row.floor);
+              let nearest = Infinity;
+              lastFloor.forEach((pos) => { nearest = Math.min(nearest, Math.abs(pos - row.floor)); });
+              records.push({
+                idle_seconds: idleSec,
+                call_type: row.call_type,
+                elevator_id: row.elevator_id,
+                assigned_distance: assignedDist,
+                nearest_distance: nearest
+              });
+            }
+          }
+          lastRequest = row.t;
+        }
+        lastFloor.set(row.elevator_id, row.floor);
+      }
+
+      const empty = {
+        count: 0, avg_idle_seconds: 0, avg_assigned_floors: 0, median_assigned_floors: 0,
+        avg_nearest_floors: 0, max_assigned_floors: 0, min_assigned_floors: 0,
+        pct_already_there: 0, pct_within_1: 0,
+        distance_buckets: { '0': 0, '1': 0, '2-3': 0, '4-6': 0, '7+': 0 },
+        by_elevator: []
+      };
+      let use = records.filter((r) => r.call_type === 'UPCALL' || r.call_type === 'DOWNCALL');
+      if (!use.length) use = records;
+      const assigned = use.map((r) => r.assigned_distance).filter((v) => v != null);
+      if (!assigned.length) return empty;
+      const nearest = use.map((r) => r.nearest_distance);
+      const avg = (arr) => arr.reduce((s, v) => s + v, 0) / arr.length;
+      const mid = (arr) => {
+        const s = [...arr].sort((a, b) => a - b);
+        const m = Math.floor(s.length / 2);
+        return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
+      };
+      const buckets = { '0': 0, '1': 0, '2-3': 0, '4-6': 0, '7+': 0 };
+      assigned.forEach((v) => {
+        if (v <= 0) buckets['0'] += 1;
+        else if (v === 1) buckets['1'] += 1;
+        else if (v <= 3) buckets['2-3'] += 1;
+        else if (v <= 6) buckets['4-6'] += 1;
+        else buckets['7+'] += 1;
+      });
+      const byMap = new Map();
+      use.forEach((r) => {
+        if (r.assigned_distance == null) return;
+        if (!byMap.has(r.elevator_id)) byMap.set(r.elevator_id, []);
+        byMap.get(r.elevator_id).push(r.assigned_distance);
+      });
+      const by_elevator = Array.from(byMap.entries()).map(([id, arr]) => ({
+        elevator_id: id,
+        avg_floors: avg(arr),
+        count: arr.length
+      })).sort((a, b) => b.avg_floors - a.avg_floors);
+      return {
+        count: use.length,
+        avg_idle_seconds: avg(use.map((r) => r.idle_seconds)),
+        avg_assigned_floors: avg(assigned),
+        median_assigned_floors: mid(assigned),
+        avg_nearest_floors: avg(nearest),
+        max_assigned_floors: Math.max(...assigned),
+        min_assigned_floors: Math.min(...assigned),
+        pct_already_there: assigned.filter((v) => v === 0).length / assigned.length * 100,
+        pct_within_1: assigned.filter((v) => v <= 1).length / assigned.length * 100,
+        distance_buckets: buckets,
+        by_elevator
       };
     }
 
@@ -300,6 +399,30 @@
           <div class="row"><span>تعداد آسانسورها</span><span>${d.unique_elevators}</span></div>
         </div>`).join('');
       const list = (arr, label) => arr.map(([k, v]) => `<li><span>${label} ${k}</span><span>${fmt(v)}</span></li>`).join('');
+      const p = result.parking_stats || {};
+      const parkingHtml = p.count ? `
+        <div class="summary-grid">
+          <div class="card"><div class="label">تعداد اولین درخواست بعد از سکوت</div><div class="value">${fmt(p.count)}</div></div>
+          <div class="card"><div class="label">میانگین مدت سکوت</div><div class="value">${fmt(p.avg_idle_seconds, 0)} ثانیه</div></div>
+          <div class="card"><div class="label">میانگین فاصله آسانسور تخصیص‌یافته</div><div class="value">${fmt(p.avg_assigned_floors, 1)} طبقه</div></div>
+          <div class="card"><div class="label">میانه فاصله</div><div class="value">${fmt(p.median_assigned_floors, 1)} طبقه</div></div>
+          <div class="card"><div class="label">میانگین فاصله نزدیک‌ترین آسانسور</div><div class="value">${fmt(p.avg_nearest_floors, 1)} طبقه</div></div>
+          <div class="card"><div class="label">کمینه / بیشینه</div><div class="value">${fmt(p.min_assigned_floors, 0)} / ${fmt(p.max_assigned_floors, 0)}</div></div>
+          <div class="card"><div class="label">همان طبقه بوده</div><div class="value">${fmt(p.pct_already_there, 1)}٪</div></div>
+          <div class="card"><div class="label">حداکثر ۱ طبقه فاصله</div><div class="value">${fmt(p.pct_within_1, 1)}٪</div></div>
+        </div>
+        <div class="info-grid">
+          <div class="info"><h3>توزیع فاصله (تعداد طبقه)</h3><ul>
+            <li><span>۰ طبقه</span><span>${p.distance_buckets['0']}</span></li>
+            <li><span>۱ طبقه</span><span>${p.distance_buckets['1']}</span></li>
+            <li><span>۲ تا ۳ طبقه</span><span>${p.distance_buckets['2-3']}</span></li>
+            <li><span>۴ تا ۶ طبقه</span><span>${p.distance_buckets['4-6']}</span></li>
+            <li><span>۷ طبقه یا بیشتر</span><span>${p.distance_buckets['7+']}</span></li>
+          </ul></div>
+          <div class="info"><h3>میانگین فاصله هر آسانسور</h3><ul>
+            ${(p.by_elevator || []).slice(0, 10).map((it) => `<li><span>آسانسور ${it.elevator_id}</span><span>${fmt(it.avg_floors, 1)} طبقه (${it.count} بار)</span></li>`).join('')}
+          </ul></div>
+        </div>` : '<div class="parking-note">برای این فایل، بعد از سکوت ۶۰ ثانیه‌ای درخواست معتبری پیدا نشد.</div>';
       $('report').innerHTML = `
         <div class="report-header">
           <div><h1 style="font-weight:300">گزارش جامع تحلیل آسانسور</h1><div class="subtitle">پردازش رویدادهای تماس و سفر</div></div>
@@ -326,6 +449,12 @@
         <div class="actions">
           <button type="button" id="backBtn">بازگشت به صفحه اصلی</button>
           <button type="button" id="dlBtn">دانلود گزارش متنی</button>
+          <button type="button" class="btn-parking" id="parkingBtn">تحلیل برای پارکینگ شناور</button>
+        </div>
+        <div id="parkingSection" class="parking-section">
+          <div class="section">تحلیل پارکینگ شناور</div>
+          <div class="parking-note">وقتی حداقل ۶۰ ثانیه هیچ دکمه‌ای نخورده، اولین درخواست بعدی ثبت می‌شود. فاصله یعنی چند طبقه بین آخرین محل شناخته‌شده آسانسور و طبقه مبدأ همان درخواست. برای دکمه راهرو (اپکال/داونکال) محاسبه شده است.</div>
+          ${parkingHtml}
         </div>`;
       $('home').style.display = 'none';
       $('report').style.display = 'block';
@@ -336,6 +465,15 @@
         a.href = URL.createObjectURL(blob);
         a.download = 'elevator_call_analysis.txt';
         a.click();
+      };
+      const parkingBtn = $('parkingBtn');
+      const parkingSection = $('parkingSection');
+      parkingBtn.onclick = () => {
+        parkingSection.classList.toggle('show');
+        parkingBtn.textContent = parkingSection.classList.contains('show')
+          ? 'بستن تحلیل پارکینگ شناور'
+          : 'تحلیل برای پارکینگ شناور';
+        if (parkingSection.classList.contains('show')) parkingSection.scrollIntoView({ behavior: 'smooth' });
       };
     }
 

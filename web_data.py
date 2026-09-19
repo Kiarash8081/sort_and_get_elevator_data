@@ -56,7 +56,8 @@ def make_json_safe(result):
         'daily_df': daily_df.to_dict('records'),
         'floor_stats': result['floor_stats'].to_dict(),
         'elevator_stats': result['elevator_stats'].to_dict(),
-        'call_type_stats': result['call_type_stats'].to_dict()
+        'call_type_stats': result['call_type_stats'].to_dict(),
+        'parking_stats': result.get('parking_stats') or {}
     }
 
 def restore_from_json(data):
@@ -78,7 +79,8 @@ def restore_from_json(data):
         'daily_df': daily_df,
         'floor_stats': pd.Series(data['floor_stats']),
         'elevator_stats': pd.Series(data['elevator_stats']),
-        'call_type_stats': pd.Series(data['call_type_stats'])
+        'call_type_stats': pd.Series(data['call_type_stats']),
+        'parking_stats': data.get('parking_stats') or {}
     }
 
 # ================ HTML صفحه اصلی ================
@@ -598,8 +600,22 @@ RESULT_HTML = '''
             text-decoration: none;
             transition: all 0.3s ease;
         }
-        .btn-back:hover {
-            background: #333333;
+        .btn-parking { background: #3d6b4f !important; }
+        .btn-parking:hover { background: #2f5440 !important; }
+        .parking-section {
+            display: none;
+            margin-top: 28px;
+            padding: 26px 24px;
+            background: #f3f7f4;
+            border: 1px solid #cfe0d3;
+            border-radius: 16px;
+        }
+        .parking-section.show { display: block; }
+        .parking-note {
+            font-size: 13px;
+            color: #667766;
+            line-height: 1.8;
+            margin-bottom: 18px;
         }
         .footer {
             margin-top: 35px;
@@ -783,6 +799,74 @@ RESULT_HTML = '''
         <div class="actions">
             <a href="/" class="btn-back">بازگشت به صفحه اصلی</a>
             <a href="/download-report" class="btn-back">دانلود گزارش متنی</a>
+            <button type="button" class="btn-back btn-parking" id="parkingBtn">تحلیل برای پارکینگ شناور</button>
+        </div>
+
+        <div id="parkingSection" class="parking-section">
+            <div class="section-title">تحلیل پارکینگ شناور</div>
+            <div class="parking-note">
+                وقتی حداقل ۶۰ ثانیه هیچ دکمه‌ای نخورده، اولین درخواست بعدی ثبت می‌شود.
+                فاصله یعنی چند طبقه بین آخرین محل شناخته‌شده آسانسور و طبقه مبدأ همان درخواست فاصله بوده است.
+                برای دکمه راهرو (اپکال/داونکال) محاسبه شده است.
+            </div>
+            {% if result.parking_stats and result.parking_stats.get('count') %}
+            <div class="summary-grid">
+                <div class="summary-card">
+                    <div class="label">تعداد اولین درخواست بعد از سکوت</div>
+                    <div class="value">{{ "{:,.0f}".format(result.parking_stats.count) }}</div>
+                </div>
+                <div class="summary-card">
+                    <div class="label">میانگین مدت سکوت</div>
+                    <div class="value small">{{ "{:.0f}".format(result.parking_stats.avg_idle_seconds) }} ثانیه</div>
+                </div>
+                <div class="summary-card">
+                    <div class="label">میانگین فاصله آسانسور تخصیص‌یافته</div>
+                    <div class="value small">{{ "{:.1f}".format(result.parking_stats.avg_assigned_floors) }} طبقه</div>
+                </div>
+                <div class="summary-card">
+                    <div class="label">میانه فاصله آسانسور تخصیص‌یافته</div>
+                    <div class="value small">{{ "{:.1f}".format(result.parking_stats.median_assigned_floors) }} طبقه</div>
+                </div>
+                <div class="summary-card">
+                    <div class="label">میانگین فاصله نزدیک‌ترین آسانسور</div>
+                    <div class="value small">{{ "{:.1f}".format(result.parking_stats.avg_nearest_floors) }} طبقه</div>
+                </div>
+                <div class="summary-card">
+                    <div class="label">کمینه / بیشینه فاصله</div>
+                    <div class="value small">{{ "{:.0f}".format(result.parking_stats.min_assigned_floors) }} / {{ "{:.0f}".format(result.parking_stats.max_assigned_floors) }}</div>
+                </div>
+                <div class="summary-card">
+                    <div class="label">همان طبقه بوده</div>
+                    <div class="value small">{{ "{:.1f}".format(result.parking_stats.pct_already_there) }}٪</div>
+                </div>
+                <div class="summary-card">
+                    <div class="label">حداکثر ۱ طبقه فاصله</div>
+                    <div class="value small">{{ "{:.1f}".format(result.parking_stats.pct_within_1) }}٪</div>
+                </div>
+            </div>
+            <div class="info-grid">
+                <div class="info-box">
+                    <h3>توزیع فاصله (تعداد طبقه)</h3>
+                    <ul>
+                        <li><span>۰ طبقه (همان‌جا)</span><span class="num">{{ result.parking_stats.distance_buckets['0'] }}</span></li>
+                        <li><span>۱ طبقه</span><span class="num">{{ result.parking_stats.distance_buckets['1'] }}</span></li>
+                        <li><span>۲ تا ۳ طبقه</span><span class="num">{{ result.parking_stats.distance_buckets['2-3'] }}</span></li>
+                        <li><span>۴ تا ۶ طبقه</span><span class="num">{{ result.parking_stats.distance_buckets['4-6'] }}</span></li>
+                        <li><span>۷ طبقه یا بیشتر</span><span class="num">{{ result.parking_stats.distance_buckets['7+'] }}</span></li>
+                    </ul>
+                </div>
+                <div class="info-box">
+                    <h3>میانگین فاصله هر آسانسور</h3>
+                    <ul>
+                    {% for item in result.parking_stats.by_elevator[:10] %}
+                        <li><span>آسانسور {{ item.elevator_id }}</span><span class="num">{{ "{:.1f}".format(item.avg_floors) }} طبقه ({{ item.count }} بار)</span></li>
+                    {% endfor %}
+                    </ul>
+                </div>
+            </div>
+            {% else %}
+            <div class="parking-note">برای این فایل، بعد از سکوت ۶۰ ثانیه‌ای درخواست معتبری پیدا نشد.</div>
+            {% endif %}
         </div>
         
         <div class="footer">
@@ -790,12 +874,145 @@ RESULT_HTML = '''
             <div class="right">تحلیل‌گر هوشمند آسانسور</div>
         </div>
     </div>
+    <script>
+        var parkingBtn = document.getElementById('parkingBtn');
+        var parkingSection = document.getElementById('parkingSection');
+        if (parkingBtn && parkingSection) {
+            parkingBtn.addEventListener('click', function() {
+                parkingSection.classList.toggle('show');
+                parkingBtn.textContent = parkingSection.classList.contains('show')
+                    ? 'بستن تحلیل پارکینگ شناور'
+                    : 'تحلیل برای پارکینگ شناور';
+                if (parkingSection.classList.contains('show')) {
+                    parkingSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                }
+            });
+        }
+    </script>
 </body>
 </html>
 '''
 
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
+
+# =====================================================================
+# بخش جدا: تحلیل پارکینگ شناور
+# بعد از مدتی بدون درخواست، اولین دکمه زده می‌شود.
+# فاصله = چند طبقه بین آخرین محل آسانسور و طبقه مبدأ آن درخواست.
+# =====================================================================
+
+IDLE_GAP_SECONDS = 60
+
+
+def _distance_buckets(values):
+    buckets = {'0': 0, '1': 0, '2-3': 0, '4-6': 0, '7+': 0}
+    for v in values:
+        if v <= 0:
+            buckets['0'] += 1
+        elif v == 1:
+            buckets['1'] += 1
+        elif v <= 3:
+            buckets['2-3'] += 1
+        elif v <= 6:
+            buckets['4-6'] += 1
+        else:
+            buckets['7+'] += 1
+    return buckets
+
+
+def analyze_floating_parking(df):
+    work = df[['event_time', 'elevator_id', 'floor_number', 'call_type', 'event_type']].copy()
+    work['floor_number'] = pd.to_numeric(work['floor_number'], errors='coerce')
+    work = work.dropna(subset=['event_time', 'floor_number', 'elevator_id'])
+    work = work.sort_values('event_time')
+
+    last_floor = {}
+    last_request_time = None
+    records = []
+
+    for event_time, elevator_id, floor_number, call_type, event_type in work.itertuples(index=False, name=None):
+        floor_number = int(floor_number)
+        is_request = event_type == 'ADDED' and str(call_type) in ('UPCALL', 'DOWNCALL', 'INCALL')
+
+        if is_request:
+            if last_request_time is not None and last_floor:
+                idle_sec = (event_time - last_request_time).total_seconds()
+                if idle_sec >= IDLE_GAP_SECONDS:
+                    assigned_pos = last_floor.get(elevator_id)
+                    assigned_dist = abs(assigned_pos - floor_number) if assigned_pos is not None else None
+                    nearest_dist = min(abs(pos - floor_number) for pos in last_floor.values())
+                    records.append({
+                        'idle_seconds': idle_sec,
+                        'call_type': call_type,
+                        'elevator_id': elevator_id,
+                        'assigned_distance': assigned_dist,
+                        'nearest_distance': nearest_dist
+                    })
+            last_request_time = event_time
+
+        last_floor[elevator_id] = floor_number
+
+    empty = {
+        'count': 0,
+        'idle_gap_seconds': IDLE_GAP_SECONDS,
+        'avg_idle_seconds': 0,
+        'avg_assigned_floors': 0,
+        'median_assigned_floors': 0,
+        'avg_nearest_floors': 0,
+        'median_nearest_floors': 0,
+        'max_assigned_floors': 0,
+        'min_assigned_floors': 0,
+        'pct_already_there': 0,
+        'pct_within_1': 0,
+        'pct_within_2': 0,
+        'distance_buckets': {'0': 0, '1': 0, '2-3': 0, '4-6': 0, '7+': 0},
+        'by_elevator': []
+    }
+    if not records:
+        return empty
+
+    rec_df = pd.DataFrame(records)
+    hall = rec_df[rec_df['call_type'].isin(['UPCALL', 'DOWNCALL'])]
+    use = hall if len(hall) else rec_df
+    assigned = pd.to_numeric(use['assigned_distance'], errors='coerce').dropna()
+    nearest = pd.to_numeric(use['nearest_distance'], errors='coerce').dropna()
+    if assigned.empty:
+        return empty
+
+    by_elev = (
+        use.dropna(subset=['assigned_distance'])
+        .groupby('elevator_id')['assigned_distance']
+        .agg(['mean', 'count'])
+        .reset_index()
+        .sort_values('mean', ascending=False)
+    )
+
+    return {
+        'count': int(len(use)),
+        'idle_gap_seconds': IDLE_GAP_SECONDS,
+        'avg_idle_seconds': float(use['idle_seconds'].mean()),
+        'avg_assigned_floors': float(assigned.mean()),
+        'median_assigned_floors': float(assigned.median()),
+        'avg_nearest_floors': float(nearest.mean()) if not nearest.empty else 0,
+        'median_nearest_floors': float(nearest.median()) if not nearest.empty else 0,
+        'max_assigned_floors': float(assigned.max()),
+        'min_assigned_floors': float(assigned.min()),
+        'pct_already_there': float((assigned == 0).mean() * 100),
+        'pct_within_1': float((assigned <= 1).mean() * 100),
+        'pct_within_2': float((assigned <= 2).mean() * 100),
+        'distance_buckets': _distance_buckets(assigned.tolist()),
+        'by_elevator': [
+            {
+                'elevator_id': row.elevator_id,
+                'avg_floors': float(row.mean),
+                'count': int(row.count)
+            }
+            for row in by_elev.itertuples(index=False)
+        ]
+    }
+
 
 def report_progress(callback, percent, message):
     if callback:
@@ -827,6 +1044,7 @@ def analyze_elevator_data(file_path, progress_callback=None):
     df['created_at'] = pd.to_datetime(df['created_at'], errors='coerce')
     df = df.dropna(subset=['event_time'])
     df['date'] = df['event_time'].dt.date
+    parking_stats = analyze_floating_parking(df)
     
     df_sorted = df.sort_values(['event_time'])
     added_df = df_sorted[df_sorted['event_type'] == 'ADDED']
@@ -978,7 +1196,8 @@ def analyze_elevator_data(file_path, progress_callback=None):
         'avg_wait_time': daily_df['avg_wait_time'].mean(),
         'avg_travel_time': daily_df['avg_travel_time'].mean(),
         'min_date': daily_df['day'].min(),
-        'max_date': daily_df['day'].max()
+        'max_date': daily_df['day'].max(),
+        'parking_stats': parking_stats
     }, None
 
 def get_current_result():
